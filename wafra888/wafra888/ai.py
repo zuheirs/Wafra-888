@@ -49,7 +49,15 @@ def _call_ai(messages: list[dict], system: str, max_tokens: int) -> str:
             {"role": _to_gemini_role(m["role"]), "parts": [{"text": m["content"]}]}
             for m in messages
         ],
-        "generationConfig": {"maxOutputTokens": max_tokens},
+        "generationConfig": {
+            "maxOutputTokens": max_tokens,
+            # موديلات Gemini 3 (زي gemini-flash-latest) بتستخدم "تفكير داخلي" قبل
+            # الرد، وهاد التفكير بياكل من نفس حصة maxOutputTokens — لو خليناه
+            # افتراضي كان عم ياكل معظم الحصة ويطلع رد مبتور بالنص. "minimal"
+            # بيقلل التفكير الداخلي لأقصى حد ممكن (Gemini 3 ما بيسمح تعطيله
+            # تماماً) عشان يفضل أكبر قدر من الحصة للرد الفعلي يلي بيشوفه العضو.
+            "thinkingConfig": {"thinkingLevel": "minimal"},
+        },
     }
     if system:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
@@ -130,7 +138,7 @@ def chat_with_member(account: dict, user_text: str) -> dict:
     api_messages = [{"role": m["role"], "content": m["content"]} for m in history]
 
     system = _member_system_prompt(account, profile)
-    reply = _call_ai(api_messages, system, max_tokens=800)
+    reply = _call_ai(api_messages, system, max_tokens=1500)
 
     match = DCA_REQUEST_RE.search(reply)
     dca_request_created = False
@@ -177,7 +185,7 @@ def _extract_pattern_background(app_obj, account_id: int) -> None:
                 ("العضو: " if m["role"] == "user" else "الكيان: ") + m["content"] for m in history[-6:]
             )
             prompt = PATTERN_PROMPT.format(recent=recent)
-            note = _call_ai([{"role": "user", "content": prompt}], system="", max_tokens=60)
+            note = _call_ai([{"role": "user", "content": prompt}], system="", max_tokens=300)
             note = note.strip()
             if note and note != "لا يوجد نمط جديد ملحوظ":
                 repo.add_pattern_note(account_id, note)
@@ -197,7 +205,7 @@ def leadership_report(records: list[dict]) -> str:
 بصياغتك الخاصة بدون اقتباس حرفي. اكتب بالعربية منظم بعنوان لكل عضو.
 
 {data_text}"""
-    return _call_ai([{"role": "user", "content": prompt}], system="", max_tokens=1500)
+    return _call_ai([{"role": "user", "content": prompt}], system="", max_tokens=2500)
 
 
 def leadership_chat(leader_account: dict, user_text: str, aggregate_data: list[dict]) -> str:
@@ -217,6 +225,6 @@ def leadership_chat(leader_account: dict, user_text: str, aggregate_data: list[d
 تحقيق الرؤية، مش بس التزام كل فرد لحاله."""
     history = repo.get_leader_chat_history(leader_account["id"], limit=current_app.config["CHAT_HISTORY_WINDOW"])
     api_messages = [{"role": m["role"], "content": m["content"]} for m in history]
-    reply = _call_ai(api_messages, system, max_tokens=800)
+    reply = _call_ai(api_messages, system, max_tokens=1500)
     repo.append_leader_chat_message(leader_account["id"], "assistant", reply)
     return reply
