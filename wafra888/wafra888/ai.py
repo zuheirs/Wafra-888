@@ -56,7 +56,7 @@ def _call_ai(messages: list[dict], system: str, max_tokens: int) -> str:
             # افتراضي كان عم ياكل معظم الحصة ويطلع رد مبتور بالنص. "minimal"
             # بيقلل التفكير الداخلي لأقصى حد ممكن (Gemini 3 ما بيسمح تعطيله
             # تماماً) عشان يفضل أكبر قدر من الحصة للرد الفعلي يلي بيشوفه العضو.
-            "thinkingConfig": {"thinkingLevel": "minimal"},
+                        "thinkingConfig": {"thinkingLevel": "low"},
         },
     }
     if system:
