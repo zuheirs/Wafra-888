@@ -1,10 +1,17 @@
-"""كل نداءات Anthropic API تصير من هون فقط — من طرف الخادم (server-side)،
-عشان مفتاح الـ API ما ينكشف أبداً بمتصفح أي عضو (كانت هاي الثغرة بالنموذج الأولي)."""
+"""كل نداءات الذكاء الاصطناعي تصير من هون فقط — من طرف الخادم (server-side)، عشان
+مفتاح الـ API ما ينكشف أبداً بمتصفح أي عضو (كانت هاي الثغرة بالنموذج الأولي).
+
+يستخدم Gemini API (google.dev) — اختيار مجاني بالكامل طلبه زهير صراحة، بعد ما
+انوضحله إن الخطة المجانية بتستخدم المحادثات لتحسين موديلات جوجل (خلافاً لـ
+Anthropic API المدفوع يلي ما بيعمل هيك افتراضياً). لو حبيتوا تبدّلوا لمزوّد
+تاني لاحقاً، هاد الملف هو المكان الوحيد يلي لازم يتعدّل — كل باقي الكود بيتعامل
+بس مع _call_ai() بشكل عام."""
 from __future__ import annotations
 
 import logging
 import re
 import threading
+import time
 
 import requests
 from flask import current_app
@@ -21,33 +28,70 @@ class AIError(RuntimeError):
     pass
 
 
-def _call_anthropic(messages: list[dict], system: str, max_tokens: int) -> str:
-    api_key = current_app.config["ANTHROPIC_API_KEY"]
+def _to_gemini_role(role: str) -> str:
+    # Gemini بيسمّي رد الموديل "model" مش "assistant" — التخزين بقاعدة البيانات
+    # ضل "assistant" بكل مكان تاني بالكود، هاد التحويل بس لحظة نداء الـ API.
+    return "model" if role == "assistant" else "user"
+
+
+def _call_ai(messages: list[dict], system: str, max_tokens: int) -> str:
+    api_key = current_app.config["GEMINI_API_KEY"]
     if not api_key:
         raise AIError(
-            "ما في مفتاح Anthropic API مضبوط بالخادم (ANTHROPIC_API_KEY). "
+            "ما في مفتاح Gemini API مضبوط بالخادم (GEMINI_API_KEY). "
             "كلّم القيادة التقنية لضبطه."
         )
+    model = current_app.config["GEMINI_MODEL"]
+    url = current_app.config["GEMINI_API_URL_TEMPLATE"].format(model=model)
+
     payload = {
-        "model": current_app.config["ANTHROPIC_MODEL"],
-        "max_tokens": max_tokens,
-        "system": system,
-        "messages": messages,
+        "contents": [
+            {"role": _to_gemini_role(m["role"]), "parts": [{"text": m["content"]}]}
+            for m in messages
+        ],
+        "generationConfig": {"maxOutputTokens": max_tokens},
     }
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": current_app.config["ANTHROPIC_VERSION"],
-        "content-type": "application/json",
-    }
-    resp = requests.post(
-        current_app.config["ANTHROPIC_API_URL"], json=payload, headers=headers, timeout=60
-    )
+    if system:
+        payload["systemInstruction"] = {"parts": [{"text": system}]}
+
+    headers = {"x-goog-api-key": api_key, "content-type": "application/json"}
+
+    # موديلات Gemini المجانية بترجع أحياناً 503 (UNAVAILABLE) وقت الضغط العالي —
+    # Google نفسها بتقول بالرسالة إنه مؤقت وينصح بإعادة المحاولة. منجرب لحتى 3
+    # مرات بفواصل قصيرة قبل ما نطلع خطأ للعضو، عشان أغلب حالات "high demand"
+    # بتنحل خلال ثواني.
+    max_attempts = 3
+    resp = None
+    for attempt in range(1, max_attempts + 1):
+        resp = requests.post(url, json=payload, headers=headers, timeout=30)
+        if resp.status_code == 200:
+            break
+        is_retryable = resp.status_code in (503, 429)
+        if is_retryable and attempt < max_attempts:
+            logger.warning(
+                "Gemini API %s (محاولة %d/%d) — بعيد المحاولة...",
+                resp.status_code, attempt, max_attempts,
+            )
+            time.sleep(2 * attempt)  # 2s ثم 4s
+            continue
+        break
+
     if resp.status_code != 200:
-        logger.error("Anthropic API error %s: %s", resp.status_code, resp.text[:500])
-        raise AIError(f"صار خطأ من Anthropic API (كود {resp.status_code})")
+        logger.error("Gemini API error %s: %s", resp.status_code, resp.text[:500])
+        if resp.status_code in (503, 429):
+            raise AIError(
+                "الكيان مزحوم شوي هلق (خدمة Gemini تحت ضغط عالي). جرب بعد دقيقة."
+            )
+        raise AIError(f"صار خطأ من Gemini API (كود {resp.status_code})")
+
     data = resp.json()
-    parts = data.get("content", [])
-    return "\n".join(p.get("text", "") for p in parts if p.get("type") == "text").strip()
+    candidates = data.get("candidates") or []
+    if not candidates:
+        # ممكن يصير لو الرد انحجب بفلتر أمان جوجل (finishReason=SAFETY) وما رجع نص
+        reason = data.get("promptFeedback", {}).get("blockReason", "unknown")
+        raise AIError(f"Gemini ما رجّع رد (سبب: {reason})")
+    parts = candidates[0].get("content", {}).get("parts", [])
+    return "\n".join(p.get("text", "") for p in parts if "text" in p).strip()
 
 
 def _member_system_prompt(account: dict, profile: dict | None) -> str:
@@ -86,7 +130,7 @@ def chat_with_member(account: dict, user_text: str) -> dict:
     api_messages = [{"role": m["role"], "content": m["content"]} for m in history]
 
     system = _member_system_prompt(account, profile)
-    reply = _call_anthropic(api_messages, system, max_tokens=800)
+    reply = _call_ai(api_messages, system, max_tokens=800)
 
     match = DCA_REQUEST_RE.search(reply)
     dca_request_created = False
@@ -133,7 +177,7 @@ def _extract_pattern_background(app_obj, account_id: int) -> None:
                 ("العضو: " if m["role"] == "user" else "الكيان: ") + m["content"] for m in history[-6:]
             )
             prompt = PATTERN_PROMPT.format(recent=recent)
-            note = _call_anthropic([{"role": "user", "content": prompt}], system="", max_tokens=60)
+            note = _call_ai([{"role": "user", "content": prompt}], system="", max_tokens=60)
             note = note.strip()
             if note and note != "لا يوجد نمط جديد ملحوظ":
                 repo.add_pattern_note(account_id, note)
@@ -153,7 +197,7 @@ def leadership_report(records: list[dict]) -> str:
 بصياغتك الخاصة بدون اقتباس حرفي. اكتب بالعربية منظم بعنوان لكل عضو.
 
 {data_text}"""
-    return _call_anthropic([{"role": "user", "content": prompt}], system="", max_tokens=1500)
+    return _call_ai([{"role": "user", "content": prompt}], system="", max_tokens=1500)
 
 
 def leadership_chat(leader_account: dict, user_text: str, aggregate_data: list[dict]) -> str:
@@ -173,6 +217,6 @@ def leadership_chat(leader_account: dict, user_text: str, aggregate_data: list[d
 تحقيق الرؤية، مش بس التزام كل فرد لحاله."""
     history = repo.get_leader_chat_history(leader_account["id"], limit=current_app.config["CHAT_HISTORY_WINDOW"])
     api_messages = [{"role": m["role"], "content": m["content"]} for m in history]
-    reply = _call_anthropic(api_messages, system, max_tokens=800)
+    reply = _call_ai(api_messages, system, max_tokens=800)
     repo.append_leader_chat_message(leader_account["id"], "assistant", reply)
     return reply
