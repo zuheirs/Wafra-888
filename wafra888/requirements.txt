@@ -5,4 +5,4 @@ gunicorn>=22.0,<23.0
 
 # Optional: only needed if you set DATABASE_URL to a postgres:// URL
 # (e.g. a Supabase project). Uncomment before deploying with Postgres.
-# psycopg[binary]>=3.1,<4.0
+ psycopg[binary]>=3.1,<4.0
