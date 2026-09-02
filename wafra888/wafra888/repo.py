@@ -140,10 +140,17 @@ def list_all_members_status() -> list[dict]:
 # ---------------------------- chat (private, per member) ----------------------------
 
 def get_chat_history(account_id: int, limit: int = 200) -> list[dict]:
-    return db.query(
-        "SELECT role, content, created_at FROM chat_messages WHERE account_id = ? ORDER BY id ASC LIMIT ?",
+    # لازم آخر limit رسالة (الأحدث)، بترتيب زمني تصاعدي — مو أول limit رسالة من
+    # بداية المحادثة. لو المحادثة أطول من limit وما رجعنا آخر الرسائل، ممكن ننسى
+    # آخر رد من الكيان (assistant) ونرسل لـ Gemini محادثة تنتهي بدور المستخدم
+    # مكرر، أو حتى تنتهي بدور الكيان القديم — وGemini بيرفض هيك طلبات بخطأ 400.
+    rows = db.query(
+        "SELECT role, content, created_at, id FROM chat_messages WHERE account_id = ? "
+        "ORDER BY id DESC LIMIT ?",
         (account_id, limit),
     )
+    rows.reverse()
+    return [{"role": r["role"], "content": r["content"], "created_at": r["created_at"]} for r in rows]
 
 
 def append_chat_message(account_id: int, role: str, content: str) -> None:
@@ -156,10 +163,13 @@ def append_chat_message(account_id: int, role: str, content: str) -> None:
 # ---------------------------- leadership free chat ----------------------------
 
 def get_leader_chat_history(account_id: int, limit: int = 200) -> list[dict]:
-    return db.query(
-        "SELECT role, content, created_at FROM leader_chat_messages WHERE account_id = ? ORDER BY id ASC LIMIT ?",
+    rows = db.query(
+        "SELECT role, content, created_at, id FROM leader_chat_messages WHERE account_id = ? "
+        "ORDER BY id DESC LIMIT ?",
         (account_id, limit),
     )
+    rows.reverse()
+    return [{"role": r["role"], "content": r["content"], "created_at": r["created_at"]} for r in rows]
 
 
 def append_leader_chat_message(account_id: int, role: str, content: str) -> None:
