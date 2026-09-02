@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}دخول — وفرة 888{% endblock %}
+{% block content %}
+<svg class="brandmark" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="50" cy="50" r="46" fill="none" stroke="#C9A227" stroke-width="1"/>
+  <circle cx="50" cy="30" r="20" fill="none" stroke="#C9A227" stroke-width="1"/>
+  <circle cx="50" cy="70" r="20" fill="none" stroke="#C9A227" stroke-width="1"/>
+  <circle cx="32" cy="50" r="20" fill="none" stroke="#C9A227" stroke-width="1"/>
+  <circle cx="68" cy="50" r="20" fill="none" stroke="#C9A227" stroke-width="1"/>
+  <circle cx="50" cy="50" r="8" fill="#C9A227"/>
+</svg>
+<div class="eyebrow">Mastermind</div>
+<h1>وفرة 888</h1>
+<p class="sub">{{ vision_short }}</p>
+<div class="center-screen">
+  <div class="card">
+    <form method="post" action="{{ url_for('auth.login_submit') }}">
+      <div class="field"><label>اسمك</label>
+        <input type="text" name="name" placeholder="اكتب اسمك متل ما هو مسجل" value="{{ name or '' }}" autofocus required>
+      </div>
+      <div class="field"><label>كلمة السر</label>
+        <input type="password" name="password" placeholder="••••" required>
+      </div>
+      <button type="submit">دخول</button>
+      {% if error %}<div class="error visible">{{ error }}</div>{% endif %}
+    </form>
+  </div>
+</div>
+{% endblock %}

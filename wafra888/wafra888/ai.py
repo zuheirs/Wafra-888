@@ -1,0 +1,178 @@
+"""كل نداءات Anthropic API تصير من هون فقط — من طرف الخادم (server-side)،
+عشان مفتاح الـ API ما ينكشف أبداً بمتصفح أي عضو (كانت هاي الثغرة بالنموذج الأولي)."""
+from __future__ import annotations
+
+import logging
+import re
+import threading
+
+import requests
+from flask import current_app
+
+from . import repo
+from .constitution import FULL_CONSTITUTION_TEXT
+
+logger = logging.getLogger("wafra888.ai")
+
+DCA_REQUEST_RE = re.compile(r"\[DCA_REQUEST\](.*?)\[/DCA_REQUEST\]", re.DOTALL)
+
+
+class AIError(RuntimeError):
+    pass
+
+
+def _call_anthropic(messages: list[dict], system: str, max_tokens: int) -> str:
+    api_key = current_app.config["ANTHROPIC_API_KEY"]
+    if not api_key:
+        raise AIError(
+            "ما في مفتاح Anthropic API مضبوط بالخادم (ANTHROPIC_API_KEY). "
+            "كلّم القيادة التقنية لضبطه."
+        )
+    payload = {
+        "model": current_app.config["ANTHROPIC_MODEL"],
+        "max_tokens": max_tokens,
+        "system": system,
+        "messages": messages,
+    }
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": current_app.config["ANTHROPIC_VERSION"],
+        "content-type": "application/json",
+    }
+    resp = requests.post(
+        current_app.config["ANTHROPIC_API_URL"], json=payload, headers=headers, timeout=60
+    )
+    if resp.status_code != 200:
+        logger.error("Anthropic API error %s: %s", resp.status_code, resp.text[:500])
+        raise AIError(f"صار خطأ من Anthropic API (كود {resp.status_code})")
+    data = resp.json()
+    parts = data.get("content", [])
+    return "\n".join(p.get("text", "") for p in parts if p.get("type") == "text").strip()
+
+
+def _member_system_prompt(account: dict, profile: dict | None) -> str:
+    profile = profile or {}
+    return f"""أنت "كيان الماستر مايند" الخاص بمجموعة وفرة 888. تتكلم مع {account['name']} بخصوصية تامة —
+لا القيادة ولا أي عضو تاني بيشوف هاد الحكي.
+
+{FULL_CONSTITUTION_TEXT}
+
+معلومات العضو الحالية:
+- DCA: {profile.get('dca') or 'غير محدد بعد'}
+- هدف 4 أشهر: {profile.get('goal4m') or 'غير محدد بعد'}
+- العائق: {profile.get('fear') or 'غير محدد بعد'}
+- أنماطه (بكلماته): {profile.get('patterns') or 'غير محدد بعد'}
+
+كل كلامك ونصائحك لازم تنبع من هالدستور (الـ WHY والقيم)، بالإضافة لمبادئ نابليون هيل
+(الهدف المحدد، الإيمان، المثابرة، تحالف العقول) ومفاهيم د. جو ديسبنزا (تنظيم الجهاز
+العصبي وتغيير الحالة الداخلية) — بصياغتك الخاصة تماماً، بدون اقتباس حرفي من أي كتاب
+أو مصدر.
+
+إذا طلب العضو تغيير الـ DCA تبعه: ناقشه أولاً بعمق (هل هاد نمو حقيقي أم نمط هروب
+متكرر؟)، وإذا أصرّ وحدد القيمة الجديدة بوضوح، أخبره إن هذا يحتاج موافقة القيادة،
+وأنهِ ردك بسطر منفصل تماماً بالشكل: [DCA_REQUEST]القيمة الجديدة[/DCA_REQUEST]
+(هاد السطر رح ينحذف من الرد يلي بيشوفه العضو وينبعث كطلب رسمي للقيادة).
+
+كن مباشر ودافئ وعملي، وما تطوّل أكتر من اللازم."""
+
+
+def chat_with_member(account: dict, user_text: str) -> dict:
+    """يرسل رسالة العضو للكيان، يخزّن الرد، يكتشف طلبات تغيير DCA، ويشغّل استخراج
+    النمط بالخلفية (بدون ما يوقف الرد عن العضو)."""
+    profile = repo.get_profile(account["id"])
+    repo.append_chat_message(account["id"], "user", user_text)
+
+    history = repo.get_chat_history(account["id"], limit=current_app.config["CHAT_HISTORY_WINDOW"])
+    api_messages = [{"role": m["role"], "content": m["content"]} for m in history]
+
+    system = _member_system_prompt(account, profile)
+    reply = _call_anthropic(api_messages, system, max_tokens=800)
+
+    match = DCA_REQUEST_RE.search(reply)
+    dca_request_created = False
+    if match:
+        new_dca = match.group(1).strip()
+        reply = DCA_REQUEST_RE.sub("", reply).strip()
+        if new_dca:
+            repo.create_dca_request(account["id"], (profile or {}).get("dca") or "", new_dca)
+            dca_request_created = True
+
+    repo.append_chat_message(account["id"], "assistant", reply)
+
+    # استخراج النمط بالخلفية — ما بيوقف رد العضو، وما بيشوفه العضو أبداً
+    app_obj = current_app._get_current_object()
+    thread = threading.Thread(
+        target=_extract_pattern_background, args=(app_obj, account["id"]), daemon=True
+    )
+    thread.start()
+
+    return {"reply": reply, "dca_request_created": dca_request_created}
+
+
+PATTERN_PROMPT = """أنت محلل أنماط سلوكية لصالح قيادة ماسترمايند وفرة 888. من المحادثة
+التالية بين عضو وكيان الماسترمايند، استخرج نمط سلوكي عام واحد فقط ينفع القيادة.
+
+قواعد صارمة وإلزامية:
+- ممنوع نقل أي جملة حرفية من كلام العضو
+- ممنوع ذكر أي تفصيل شخصي محدد (اسم شخص، حدث، مكان، موضوع خاص تحدث عنه)
+- اكتب النمط بشكل مجرد فقط، سطر واحد أقل من 15 كلمة، مثل: "ميل لتبرير التأجيل" أو
+  "تقدم ثابت بالتنفيذ" أو "يعيد طرح نفس التساؤل بدل الحسم"
+- إذا ما في نمط واضح أو جديد، اكتب بالضبط: لا يوجد نمط جديد ملحوظ
+
+رد بالسطر فقط بدون أي مقدمة أو شرح.
+
+المحادثة:
+{recent}"""
+
+
+def _extract_pattern_background(app_obj, account_id: int) -> None:
+    with app_obj.app_context():
+        try:
+            history = repo.get_chat_history(account_id, limit=6)
+            recent = "\n".join(
+                ("العضو: " if m["role"] == "user" else "الكيان: ") + m["content"] for m in history[-6:]
+            )
+            prompt = PATTERN_PROMPT.format(recent=recent)
+            note = _call_anthropic([{"role": "user", "content": prompt}], system="", max_tokens=60)
+            note = note.strip()
+            if note and note != "لا يوجد نمط جديد ملحوظ":
+                repo.add_pattern_note(account_id, note)
+        except Exception:  # pragma: no cover - background best-effort
+            logger.exception("pattern extraction failed for account %s", account_id)
+
+
+def leadership_report(records: list[dict]) -> str:
+    data_text = "\n---\n".join(
+        f"الاسم: {r['name']}\nDCA: {r.get('dca','')}\nهدف 4 أشهر: {r.get('goal4m','')}\n"
+        f"العائق: {r.get('fear','')}\nشو بيعطي: {r.get('give','')}\nشو بدو: {r.get('want','')}\n"
+        f"الأنماط: {r.get('patterns','')}"
+        for r in records
+    )
+    prompt = f"""أنت مساعد ماسترمايند "وفرة 888" القائم على مبادئ نابليون هيل ومفاهيم د. جو
+ديسبنزا. لكل عضو اكتب: 1) ملخص قصير، 2) نمط واحد لاحظته، 3) نصيحة عملية مختصرة
+بصياغتك الخاصة بدون اقتباس حرفي. اكتب بالعربية منظم بعنوان لكل عضو.
+
+{data_text}"""
+    return _call_anthropic([{"role": "user", "content": prompt}], system="", max_tokens=1500)
+
+
+def leadership_chat(leader_account: dict, user_text: str, aggregate_data: list[dict]) -> str:
+    repo.append_leader_chat_message(leader_account["id"], "user", user_text)
+    data_text = "\n".join(
+        f"{r['name']}: DCA={r.get('dca','')} | هدف4أشهر={r.get('goal4m','')} | "
+        f"عائق={r.get('fear','')} | أنماط={r.get('patterns','')}"
+        for r in aggregate_data
+    )
+    system = f"""أنت مساعد قيادة ماسترمايند "وفرة 888". عندك بيانات الأعضاء العامة التالية
+(وليس أي محتوى من المحادثات الخاصة للأعضاء، هذه سرية تماماً):
+{data_text}
+
+{FULL_CONSTITUTION_TEXT}
+
+جاوب أسئلة القيادة بشكل مباشر ومختصر، وركّز عند الطلب على وين المجموعة ككل بطريق
+تحقيق الرؤية، مش بس التزام كل فرد لحاله."""
+    history = repo.get_leader_chat_history(leader_account["id"], limit=current_app.config["CHAT_HISTORY_WINDOW"])
+    api_messages = [{"role": m["role"], "content": m["content"]} for m in history]
+    reply = _call_anthropic(api_messages, system, max_tokens=800)
+    repo.append_leader_chat_message(leader_account["id"], "assistant", reply)
+    return reply
