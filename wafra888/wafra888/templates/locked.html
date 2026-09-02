@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}الحساب غير فعّال — وفرة 888{% endblock %}
+{% block content %}
+<div class="eyebrow">Mastermind</div>
+<h1>وفرة 888</h1>
+<div class="center-screen">
+  <div class="card" style="text-align:center;">
+    {% if account.status == 'locked_pending_review' %}
+      <p>حسابك موقوف مؤقتاً بانتظار مراجعة القيادة{% if account.status_note %} — {{ account.status_note }}{% endif %}.</p>
+      <p class="hint">تواصل مع القيادة مباشرة لتوضيح الموضوع.</p>
+    {% elif account.status == 'frozen' %}
+      <p>حسابك مجمّد حالياً{% if account.frozen_until %} حتى {{ account.frozen_until }}{% endif %}.</p>
+      {% if account.status_note %}<p class="hint">{{ account.status_note }}</p>{% endif %}
+    {% else %}
+      <p>حسابك مو فعّال حالياً. تواصل مع القيادة.</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('auth.logout') }}" style="margin-top:14px;">
+      <button type="submit" class="ghost">خروج</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

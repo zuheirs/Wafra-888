@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}وفرة 888{% endblock %}
+{% block extra_head %}
+<meta name="csrf-token" content="{{ csrf_token }}">
+<meta name="account-role" content="{{ account.role }}">
+{% endblock %}
+{% block content %}
+<div class="topbar">
+  <span>أهلاً {{ account.name }} <span class="pill {{ 'leadership' if account.role == 'leadership' else '' }}">{{ 'قيادة' if account.role == 'leadership' else 'عضو' }}</span></span>
+  <form method="post" action="{{ url_for('auth.logout') }}"><button type="submit" class="small ghost" style="width:auto;">خروج</button></form>
+</div>
+
+<div class="tabs" id="main-tabs">
+  <div class="tab active" data-tab="profile">بروفايلي</div>
+  <div class="tab" data-tab="chat">محادثة خاصة</div>
+  <div class="tab" data-tab="board">الأعضاء</div>
+  <div class="tab" data-tab="charter">الميثاق</div>
+  {% if account.role == 'leadership' %}<div class="tab" data-tab="leadership">مجلس القيادة</div>{% endif %}
+</div>
+
+<div class="panel active" id="panel-profile">
+  <div class="card">
+    <div class="field"><label>هدفك المحدد الأساسي (DCA) <span class="req">*</span></label><textarea id="f-dca"></textarea></div>
+    <div class="field"><label>هدفك المحدد خلال 4 أشهر القادمين <span class="req">*</span></label><textarea id="f-goal4m"></textarea></div>
+    <div class="field"><label>أكبر خوف أو عائق عم يوقفك <span class="req">*</span></label><textarea id="f-fear"></textarea></div>
+    <div class="field"><label>شو بدك تعطي الماستر مايند <span class="req">*</span></label><textarea id="f-give"></textarea></div>
+    <div class="field"><label>شو بدك من الماستر مايند <span class="req">*</span></label><textarea id="f-want"></textarea></div>
+    <div class="field"><label>الأنماط المكررة عندي بصدق <span class="req">*</span></label><textarea id="f-patterns"></textarea></div>
+    <div class="field">
+      <label>شروط وسياسات الماستر مايند <span class="req">*</span></label>
+      <div class="terms-box">{{ charter_agreement_text }}</div>
+      <div class="checkline"><input type="checkbox" id="f-agree"><label for="f-agree" style="margin:0;">أنا موافق على شروط وسياسات الماستر مايند</label></div>
+    </div>
+    <button id="submit-btn">حفظ البروفايل</button>
+    <div class="status" id="save-status" style="display:none;">تم الحفظ ✓</div>
+    <div class="error" id="profile-error">لازم تعبي كل الحقول وتوافق على الشروط</div>
+  </div>
+</div>
+
+<div class="panel" id="panel-chat">
+  <p class="privacy-note">هاي المحادثة خاصة — مصممة بحيث ما تظهر بواجهة القيادة إلا إذا طلبت رسمياً تغيير الـ DCA تبعك.</p>
+  <div class="card">
+    <div class="chat-log" id="chat-log"></div>
+    <div class="chat-input-row">
+      <textarea id="chat-input" placeholder="اكتب هون... (أو استخدم الميكروفون)"></textarea>
+      <button type="button" class="mic" id="mic-btn" title="تسجيل صوتي">🎤</button>
+      <button type="button" id="chat-send-btn">إرسال</button>
+    </div>
+    <div class="hint" id="mic-hint" style="display:none;"></div>
+  </div>
+</div>
+
+<div class="panel" id="panel-board">
+  <div class="refresh"><span id="refresh-board">تحديث</span></div>
+  <div class="card"><div class="empty" id="board-empty">جاري التحميل...</div><div id="board-list"></div></div>
+</div>
+
+<div class="panel" id="panel-charter">
+  <div class="card">
+    <h2>القيم</h2>
+    <p class="hint">{{ values | join('، ') }}</p>
+  </div>
+  <div class="card">
+    <h2>ميثاق الحضور والالتزام</h2>
+    <ol style="padding-inline-start:20px; line-height:2; font-size:13px;">
+      {% for rule in charter_rules %}<li>{{ rule }}</li>{% endfor %}
+    </ol>
+  </div>
+</div>
+
+{% if account.role == 'leadership' %}
+<div class="panel" id="panel-leadership">
+  <div class="card">
+    <h2>تنبيهات القيادة</h2>
+    <div class="refresh"><span id="refresh-notifications">تحديث</span></div>
+    <div class="empty" id="notifications-empty">لا يوجد تنبيهات.</div>
+    <div id="notifications-list"></div>
+  </div>
+
+  <div class="card">
+    <h2>الأعضاء</h2>
+    <div class="refresh"><span id="refresh-leadership">تحديث اللوحة</span></div>
+    <div class="empty" id="leadership-empty">لسا ما في أعضاء سجّلوا.</div>
+    <div id="leadership-list"></div>
+  </div>
+
+  <div class="card">
+    <label>طلبات تغيير الـ DCA بانتظار الموافقة</label>
+    <div class="empty" id="requests-empty">ما في طلبات حالياً.</div>
+    <div id="requests-list"></div>
+  </div>
+
+  <div class="card">
+    <label>أنماط الأعضاء (مجردة — بدون تفاصيل خاصة)</label>
+    <div class="hint" style="margin-bottom:10px;">ملاحظات سلوكية عامة مستخرجة من المحادثات الخاصة، بدون أي اقتباس أو تفصيل شخصي.</div>
+    <div class="empty" id="patterns-empty">ما في أنماط مسجلة بعد.</div>
+    <div id="patterns-list"></div>
+  </div>
+
+  <div class="card">
+    <label>حسابات تحتاج قرار (مقفولة / مجمّدة)</label>
+    <div class="empty" id="flagged-empty">ما في حسابات معلّقة حالياً.</div>
+    <div id="flagged-list"></div>
+  </div>
+
+  <div class="card">
+    <label>الحضور والالتزام</label>
+    <div class="row" style="margin-top:8px;">
+      <input type="date" id="new-meeting-date">
+      <input type="text" id="new-meeting-notes" placeholder="ملاحظة عن الاجتماع (اختياري)">
+    </div>
+    <button type="button" class="ghost" id="create-meeting-btn" style="margin-top:8px;">تسجيل اجتماع جديد</button>
+    <div class="field" style="margin-top:14px;">
+      <label>اختر اجتماع لتسجيل الحضور</label>
+      <select id="meeting-select"></select>
+    </div>
+    <div id="attendance-list"></div>
+    <button type="button" id="save-attendance-btn" style="margin-top:8px; display:none;">حفظ الحضور</button>
+  </div>
+
+  <div class="card">
+    <label>تذكيرات يدوية (واتساب)</label>
+    <div class="hint" style="margin-bottom:10px;">ما في حل واتساب آلي مجاني بهالحجم — هاي قائمة بمين يحتاج تذكير، مع رابط واتساب جاهز لو رقمه مسجّل.</div>
+    <div class="empty" id="reminders-empty">ما حد محتاج تذكير حالياً 🎉</div>
+    <div id="reminders-list"></div>
+  </div>
+
+  <div class="card">
+    <label>تقرير تحليلي عن كل الأعضاء</label>
+    <button type="button" id="report-btn" class="ghost">توليد تقرير</button>
+    <div class="spinner" id="report-spinner">جاري تحليل بيانات الأعضاء...</div>
+    <div class="report-box" id="report-box"></div>
+  </div>
+
+  <div class="card">
+    <label>محادثة حرة مع الكيان عن حالة الماسترمايند</label>
+    <div class="hint" style="margin-bottom:10px;">مبنية على بيانات الأعضاء العامة فقط — وليس محتوى محادثاتهم الخاصة.</div>
+    <div class="chat-log" id="leader-chat-log"></div>
+    <div class="chat-input-row">
+      <textarea id="leader-chat-input" placeholder="اسأل عن وضع الأعضاء أو المجموعة ككل..."></textarea>
+      <button type="button" id="leader-chat-send">إرسال</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+{% if account.role == 'leadership' %}
+<script src="{{ url_for('static', filename='js/leadership.js') }}"></script>
+{% endif %}
+{% endblock %}
