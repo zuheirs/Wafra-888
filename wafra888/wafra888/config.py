@@ -16,10 +16,14 @@ class Config:
     DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
     SQLITE_PATH = os.environ.get("SQLITE_PATH", "wafra888.db")
 
-    ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5").strip()
-    ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-    ANTHROPIC_VERSION = "2023-06-01"
+    # Gemini API (google.dev) — اختيار المستخدم صراحة لأنه مجاني بالكامل. لاحظ إن
+    # الخطة المجانية بتستخدم بياناتك لتحسين موديلات جوجل (خلافاً لـ Anthropic API
+    # المدفوع يلي ما بيعمل هيك افتراضياً) — قرار واعٍ اتخذه زهير رغم توضيح هالفرق له.
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+    GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    GEMINI_API_URL_TEMPLATE = (
+        "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    )
 
     RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "").strip()
     RESEND_FROM = os.environ.get("RESEND_FROM", "Wafra 888 <noreply@example.com>")
