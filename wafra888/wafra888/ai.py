@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import time
 
 import requests
 from flask import current_app
@@ -54,9 +55,33 @@ def _call_ai(messages: list[dict], system: str, max_tokens: int) -> str:
         payload["systemInstruction"] = {"parts": [{"text": system}]}
 
     headers = {"x-goog-api-key": api_key, "content-type": "application/json"}
-    resp = requests.post(url, json=payload, headers=headers, timeout=60)
+
+    # موديلات Gemini المجانية بترجع أحياناً 503 (UNAVAILABLE) وقت الضغط العالي —
+    # Google نفسها بتقول بالرسالة إنه مؤقت وينصح بإعادة المحاولة. منجرب لحتى 3
+    # مرات بفواصل قصيرة قبل ما نطلع خطأ للعضو، عشان أغلب حالات "high demand"
+    # بتنحل خلال ثواني.
+    max_attempts = 3
+    resp = None
+    for attempt in range(1, max_attempts + 1):
+        resp = requests.post(url, json=payload, headers=headers, timeout=30)
+        if resp.status_code == 200:
+            break
+        is_retryable = resp.status_code in (503, 429)
+        if is_retryable and attempt < max_attempts:
+            logger.warning(
+                "Gemini API %s (محاولة %d/%d) — بعيد المحاولة...",
+                resp.status_code, attempt, max_attempts,
+            )
+            time.sleep(2 * attempt)  # 2s ثم 4s
+            continue
+        break
+
     if resp.status_code != 200:
         logger.error("Gemini API error %s: %s", resp.status_code, resp.text[:500])
+        if resp.status_code in (503, 429):
+            raise AIError(
+                "الكيان مزحوم شوي هلق (خدمة Gemini تحت ضغط عالي). جرب بعد دقيقة."
+            )
         raise AIError(f"صار خطأ من Gemini API (كود {resp.status_code})")
 
     data = resp.json()
