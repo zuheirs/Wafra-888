@@ -72,11 +72,7 @@
           <span class="member-date">${fmtDate(rec.updated_at)} · ${ACCOUNT_STATUS_LABELS[rec.status] || rec.status}</span>
         </div>
         <div class="member-row"><b>DCA:</b> ${escapeHtml(rec.dca)}</div>
-        <div class="member-row"><b>هدف 4 أشهر:</b> ${escapeHtml(rec.goal4m)}</div>
-        <div class="member-row"><b>العائق:</b> ${escapeHtml(rec.fear)}</div>
-        <div class="member-row"><b>شو بيعطي:</b> ${escapeHtml(rec.give)}</div>
-        <div class="member-row"><b>شو بدو:</b> ${escapeHtml(rec.want)}</div>
-        <div class="member-row"><b>أنماطه:</b> ${escapeHtml(rec.patterns)}</div>`;
+        <div class="member-row"><b>هدف 4 أشهر:</b> ${escapeHtml(rec.goal4m)}</div>`;
       listEl.appendChild(div);
     });
   }
