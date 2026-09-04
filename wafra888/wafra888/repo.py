@@ -119,9 +119,12 @@ def upsert_profile(account_id: int, fields: dict) -> None:
 
 
 def list_profiles_with_names() -> list[dict]:
+    # القيادة بتشوف بس DCA وهدف الـ4 أشهر — العائق/شو بيعطي/شو بدو/أنماطه بكلماته
+    # إجابات خاصة بالعضو وما بتنعرض حرفياً لأي حد (حتى القيادة)، غير النمط
+    # المجرّد يلي الذكاء الاصطناعي بيستخرجه بسرية تامة (جدول pattern_notes).
     return db.query(
         """SELECT a.id as account_id, a.name, a.role, a.status,
-                  p.dca, p.goal4m, p.fear, p.give, p.want, p.patterns, p.agreed, p.updated_at
+                  p.dca, p.goal4m, p.agreed, p.updated_at
            FROM accounts a JOIN profiles p ON p.account_id = a.id
            ORDER BY p.updated_at DESC"""
     )
