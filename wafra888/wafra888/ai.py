@@ -53,10 +53,11 @@ def _call_ai(messages: list[dict], system: str, max_tokens: int) -> str:
             "maxOutputTokens": max_tokens,
             # موديلات Gemini 3 (زي gemini-flash-latest) بتستخدم "تفكير داخلي" قبل
             # الرد، وهاد التفكير بياكل من نفس حصة maxOutputTokens — لو خليناه
-            # افتراضي كان عم ياكل معظم الحصة ويطلع رد مبتور بالنص. "minimal"
-            # بيقلل التفكير الداخلي لأقصى حد ممكن (Gemini 3 ما بيسمح تعطيله
-            # تماماً) عشان يفضل أكبر قدر من الحصة للرد الفعلي يلي بيشوفه العضو.
-                        "thinkingConfig": {"thinkingLevel": "low"},
+            # افتراضي كان عم ياكل معظم الحصة ويطلع رد مبتور بالنص. "low" أخفض
+            # مستوى مدعوم فعلياً بالموديل الحالي (gemini-3.7-flash ما بيدعم
+            # "minimal" وبيرجع خطأ 400 عليها) عشان يفضل أكبر قدر ممكن من
+            # الحصة للرد الفعلي يلي بيشوفه العضو.
+            "thinkingConfig": {"thinkingLevel": "low"},
         },
     }
     if system:
@@ -194,14 +195,14 @@ def _extract_pattern_background(app_obj, account_id: int) -> None:
 
 
 def leadership_report(records: list[dict]) -> str:
+    # قصداً ما منمرر غير DCA وهدف الـ4 أشهر — العائق/شو بيعطي/شو بدو إجابات خاصة
+    # بالعضو وما لازم توصل حرفياً لا للقيادة ولا للذكاء الاصطناعي بهالسياق.
     data_text = "\n---\n".join(
-        f"الاسم: {r['name']}\nDCA: {r.get('dca','')}\nهدف 4 أشهر: {r.get('goal4m','')}\n"
-        f"العائق: {r.get('fear','')}\nشو بيعطي: {r.get('give','')}\nشو بدو: {r.get('want','')}\n"
-        f"الأنماط: {r.get('patterns','')}"
+        f"الاسم: {r['name']}\nDCA: {r.get('dca','')}\nهدف 4 أشهر: {r.get('goal4m','')}"
         for r in records
     )
     prompt = f"""أنت مساعد ماسترمايند "وفرة 888" القائم على مبادئ نابليون هيل ومفاهيم د. جو
-ديسبنزا. لكل عضو اكتب: 1) ملخص قصير، 2) نمط واحد لاحظته، 3) نصيحة عملية مختصرة
+ديسبنزا. لكل عضو اكتب: 1) ملخص قصير بناءً على الـ DCA والهدف، 2) نصيحة عملية مختصرة
 بصياغتك الخاصة بدون اقتباس حرفي. اكتب بالعربية منظم بعنوان لكل عضو.
 
 {data_text}"""
@@ -211,8 +212,7 @@ def leadership_report(records: list[dict]) -> str:
 def leadership_chat(leader_account: dict, user_text: str, aggregate_data: list[dict]) -> str:
     repo.append_leader_chat_message(leader_account["id"], "user", user_text)
     data_text = "\n".join(
-        f"{r['name']}: DCA={r.get('dca','')} | هدف4أشهر={r.get('goal4m','')} | "
-        f"عائق={r.get('fear','')} | أنماط={r.get('patterns','')}"
+        f"{r['name']}: DCA={r.get('dca','')} | هدف4أشهر={r.get('goal4m','')}"
         for r in aggregate_data
     )
     system = f"""أنت مساعد قيادة ماسترمايند "وفرة 888". عندك بيانات الأعضاء العامة التالية
