@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
 from .. import auth, repo
-from ..constitution import CHARTER_AGREEMENT_TEXT, CHARTER_RULES, VALUES
+from ..constitution import CHARTER_AGREEMENT_TEXT, CHARTER_RULES, VALUES, WHY
 from ..security import hash_password, slugify, verify_password
 
 bp = Blueprint("auth", __name__)
@@ -23,6 +23,7 @@ def index():
         charter_rules=CHARTER_RULES,
         charter_agreement_text=CHARTER_AGREEMENT_TEXT,
         values=VALUES,
+        why=WHY,
     )
 
 
